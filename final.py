@@ -32,6 +32,31 @@ person_position = None
 thumbs_up_triggered = False
 last_thumbs_time = 0
 
+# ✅ Helper function for calculating distance and direction
+def get_distance_and_direction(obj_pos, person_pos):
+    dx = obj_pos[0] - person_pos[0]
+    dy = obj_pos[1] - person_pos[1]
+    pixel_distance = int((dx**2 + dy**2) ** 0.5)
+
+    # Convert pixel distance to centimeters
+    pixels_to_cm = 0.25
+    distance_cm = pixel_distance * pixels_to_cm
+
+    # Readable unit
+    if distance_cm < 100:
+        distance_str = f"{int(distance_cm)} centimeters"
+    else:
+        distance_str = f"{distance_cm / 100:.1f} meters"
+
+    # Determine direction
+    direction = "center"
+    if dx > 40:
+        direction = "right"
+    elif dx < -40:
+        direction = "left"
+
+    return distance_str, direction
+
 def is_thumbs_up(hand_landmarks):
     thumb_tip = hand_landmarks.landmark[mp_hands.HandLandmark.THUMB_TIP]
     index_tip = hand_landmarks.landmark[mp_hands.HandLandmark.INDEX_FINGER_TIP]
@@ -82,18 +107,22 @@ while True:
                 static_objects[name] = (avg_x, avg_y)
 
         print("🔒 Static objects locked:", static_objects)
-        if static_objects:
-            sentence = "I see " + ", ".join(static_objects.keys())
+        if static_objects and person_position:
+            description_parts = []
+            for name, pos in static_objects.items():
+                distance_str, direction = get_distance_and_direction(pos, person_position)
+                description_parts.append(f"{name} about {distance_str} to your {direction}")
+
+            sentence = "I see " + ", and ".join(description_parts)
         else:
             sentence = "I could not detect any consistent objects."
         print("🔊", sentence)
         engine.stop()
         engine.say(" ")
         engine.runAndWait()
-        engine.say("... " + sentence)
+        engine.say(sentence)
         time.sleep(0.2)
         engine.runAndWait()
-        
 
     if hand_results.multi_hand_landmarks:
         for hand_landmarks in hand_results.multi_hand_landmarks:
@@ -105,29 +134,7 @@ while True:
                     if static_objects and person_position:
                         speak_queue = []
                         for obj_name, obj_pos in static_objects.items():
-                            dx = obj_pos[0] - person_position[0]
-                            dy = obj_pos[1] - person_position[1]
-                            pixel_distance = int((dx**2 + dy**2) ** 0.5)
-
-                            # Convert pixel distance to centimeters
-                            pixels_to_cm = 0.25
-                            distance_cm = pixel_distance * pixels_to_cm
-
-                            # Determine readable unit
-                            if distance_cm < 100:
-                                distance_str = f"{int(distance_cm)} centimeters"
-                            
-                            else:
-                                distance_m = distance_cm / 100
-                                distance_str = f"{distance_m:.1f} meters"
-
-                            # Determine direction
-                            direction = "center"
-                            if dx > 40:
-                                direction = "right"
-                            elif dx < -40:
-                                direction = "left"
-
+                            distance_str, direction = get_distance_and_direction(obj_pos, person_position)
                             speak = f"{obj_name} is approximately {distance_str} to your {direction}"
                             print("🔊", speak)
                             speak_queue.append(speak)

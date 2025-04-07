@@ -109,13 +109,26 @@ while True:
                             dy = obj_pos[1] - person_position[1]
                             pixel_distance = int((dx**2 + dy**2) ** 0.5)
 
+                            # Convert pixel distance to centimeters
+                            pixels_to_cm = 0.25
+                            distance_cm = pixel_distance * pixels_to_cm
+
+                            # Determine readable unit
+                            if distance_cm < 100:
+                                distance_str = f"{int(distance_cm)} centimeters"
+                            
+                            else:
+                                distance_m = distance_cm / 100
+                                distance_str = f"{distance_m:.1f} meters"
+
+                            # Determine direction
                             direction = "center"
                             if dx > 40:
                                 direction = "right"
                             elif dx < -40:
                                 direction = "left"
 
-                            speak = f"{obj_name} is approximately {pixel_distance} pixels to your {direction}"
+                            speak = f"{obj_name} is approximately {distance_str} to your {direction}"
                             print("🔊", speak)
                             speak_queue.append(speak)
 

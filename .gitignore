@@ -1,0 +1,14 @@
+# Virtual environment
+venv/
+__pycache__/
+
+# Model weights & media
+*.pt
+*.mp4
+*.avi
+*.jpg
+*.png
+
+# System
+.DS_Store
+Thumbs.db

@@ -1,6 +1,8 @@
 import cv2
 import pyttsx3
+import time
 from ultralytics import YOLO
+from collections import defaultdict
 
 # Initialize voice engine
 engine = pyttsx3.init()
@@ -14,25 +16,37 @@ cap = cv2.VideoCapture(0)
 # Flag to only announce once
 objects_announced = False
 
+# Timer start
+start_time = time.time()
+
+# Track how many frames each object appears in
+object_frame_counts = defaultdict(int)
+
+# Scanning phase for 5 seconds
 while True:
     ret, frame = cap.read()
     if not ret:
         break
 
-    # Run YOLO detection
     results = model(frame, verbose=False)
-    names = model.names  # Class names like 'bottle', 'chair'
+    names = model.names
 
-    # Get all detected classes from the frame
-    detected_objects = set()
     for r in results:
         for box in r.boxes:
             cls_id = int(box.cls[0])
-            detected_objects.add(names[cls_id])
+            class_name = names[cls_id]
+            object_frame_counts[class_name] += 1
 
-    # Only announce once
-    if not objects_announced and detected_objects:
-        sentence = "I see " + ", ".join(detected_objects)
+    # Only announce after 5 seconds
+    if not objects_announced and (time.time() - start_time >= 8):
+        # Filter objects that appeared in ≥ 15 frames
+        consistent_objects = [obj for obj, count in object_frame_counts.items() if count >= 30]
+
+        if consistent_objects:
+            sentence = "I see " + ", ".join(consistent_objects)
+        else:
+            sentence = "I could not detect any consistent objects."
+
         print("🔊", sentence)
         engine.say(sentence)
         engine.runAndWait()
@@ -42,7 +56,6 @@ while True:
     annotated_frame = results[0].plot()
     cv2.imshow("Object Detection", annotated_frame)
 
-    # Press Q to quit
     if cv2.waitKey(1) & 0xFF == ord('q'):
         break
 

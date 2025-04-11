@@ -7,7 +7,7 @@ import numpy as np
 
 # Initialize voice engine
 engine = pyttsx3.init()
-speaking = False  # Flag to avoid double runAndWait crashes
+speaking = False  
 
 # Load YOLOv8 model
 model = YOLO("yolov8n.pt")
@@ -24,15 +24,17 @@ cap = cv2.VideoCapture(0)
 
 start_time = time.time()
 object_detection_duration = 8
-frame_stability_threshold = 30
+frame_stability_threshold = 20
 
 object_appearances = {}
 static_objects = {}
 person_position = None
 thumbs_up_triggered = False
 last_thumbs_time = 0
+last_seen = {}
+object_timeout = 5
 
-# ✅ Helper function for calculating distance and direction
+# Helper function for calculating distance and direction
 def get_distance_and_direction(obj_pos, person_pos):
     dx = obj_pos[0] - person_pos[0]
     dy = obj_pos[1] - person_pos[1]
@@ -98,6 +100,7 @@ while True:
             if name not in object_appearances:
                 object_appearances[name] = []
             object_appearances[name].append((cx, cy))
+            last_seen[name] = current_time
 
     if elapsed_time >= object_detection_duration and not static_objects:
         for name, positions in object_appearances.items():
@@ -106,7 +109,7 @@ while True:
                 avg_y = int(np.mean([p[1] for p in positions]))
                 static_objects[name] = (avg_x, avg_y)
 
-        print("🔒 Static objects locked:", static_objects)
+        print("Static objects locked:", static_objects)
         if static_objects and person_position:
             description_parts = []
             for name, pos in static_objects.items():
@@ -123,6 +126,11 @@ while True:
         engine.say(sentence)
         time.sleep(0.2)
         engine.runAndWait()
+
+    for name in list(static_objects.keys()):
+        if name not in last_seen or (current_time - last_seen[name]) > object_timeout:
+            print(f"❌ Removing lost object: {name}")
+            del static_objects[name]
 
     if hand_results.multi_hand_landmarks:
         for hand_landmarks in hand_results.multi_hand_landmarks:
@@ -148,7 +156,7 @@ while True:
                             engine.runAndWait()
                             time.sleep(0.5)
                         except RuntimeError:
-                            print("⚠️ Voice engine was already running, skipping.")
+                            print("Voice engine was already running, skipping.")
                         speaking = False
             else:
                 thumbs_up_triggered = False

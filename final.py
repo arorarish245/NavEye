@@ -24,7 +24,7 @@ cap = cv2.VideoCapture(0)
 
 start_time = time.time()
 object_detection_duration = 8
-frame_stability_threshold = 35
+frame_stability_threshold = 45
 
 object_appearances = {}
 static_objects = {}
@@ -32,9 +32,10 @@ person_position = None
 thumbs_up_triggered = False
 last_thumbs_time = 0
 last_seen = {}
-object_timeout = 5
+object_timeout = 10
 initial_static_locked = False
-announced_new_objects = set()  # To track newly announced objects
+announced_new_objects = set() 
+selected_object_name = None
 
 
 # Helper function for calculating distance and direction
@@ -64,12 +65,22 @@ def get_distance_and_direction(obj_pos, person_pos):
 
 def is_thumbs_up(hand_landmarks):
     thumb_tip = hand_landmarks.landmark[mp_hands.HandLandmark.THUMB_TIP]
-    index_tip = hand_landmarks.landmark[mp_hands.HandLandmark.INDEX_FINGER_TIP]
+    thumb_ip = hand_landmarks.landmark[mp_hands.HandLandmark.THUMB_IP]
+    thumb_mcp = hand_landmarks.landmark[mp_hands.HandLandmark.THUMB_MCP]
+    index_mcp = hand_landmarks.landmark[mp_hands.HandLandmark.INDEX_FINGER_MCP]
     middle_tip = hand_landmarks.landmark[mp_hands.HandLandmark.MIDDLE_FINGER_TIP]
     ring_tip = hand_landmarks.landmark[mp_hands.HandLandmark.RING_FINGER_TIP]
     pinky_tip = hand_landmarks.landmark[mp_hands.HandLandmark.PINKY_TIP]
-    return (thumb_tip.y < index_tip.y and thumb_tip.y < middle_tip.y and
-            thumb_tip.y < ring_tip.y and thumb_tip.y < pinky_tip.y)
+
+    thumb_up = thumb_tip.y < thumb_ip.y < thumb_mcp.y
+
+    fingers_folded = (
+        middle_tip.y > index_mcp.y and
+        ring_tip.y > index_mcp.y and
+        pinky_tip.y > index_mcp.y
+    )
+
+    return thumb_up and fingers_folded
 
 print("Scanning for static objects...")
 
@@ -112,25 +123,72 @@ while True:
                 avg_x = int(np.mean([p[0] for p in positions]))
                 avg_y = int(np.mean([p[1] for p in positions]))
                 static_objects[name] = (avg_x, avg_y) 
-        initial_static_locked = True  # ✅ Mark that we’ve done initial locking
-        print("🔒 Initial static objects locked:", static_objects)
+        initial_static_locked = True  # Mark that we’ve done initial locking
+        print("Initial static objects locked:", static_objects)
 
-        if static_objects and person_position:
-            description_parts = []
-            for name, pos in static_objects.items():
-                distance_str, direction = get_distance_and_direction(pos, person_position)
-                description_parts.append(f"{name} about {distance_str} to your {direction}")
+        if static_objects:
+            object_list_str = ", ".join(static_objects.keys())
+            print("🔊 I see:", object_list_str)
+            engine.say(f"I see: {object_list_str}")
+            engine.runAndWait()
+            cv2.waitKey(1)
+            engine.say("I will now name each object. Show thumbs-up when I say the one you want to track.")
+            engine.runAndWait()
+            cv2.waitKey(1)
 
-            sentence = "I see " + ", and ".join(description_parts)
+            
+            for name in static_objects:
+                engine.say(name)
+                engine.runAndWait()
+                cv2.waitKey(1)
+
+                thumbs_start = time.time()
+                while time.time() - thumbs_start < 8:
+                    ret_check, frame_check = cap.read()
+                    if not ret_check:
+                        print("Camera read failed.")
+
+                        break
+
+                    frame_check = cv2.flip(frame_check, 1)
+                    rgb_check = cv2.cvtColor(frame_check, cv2.COLOR_BGR2RGB)
+                    hand_check = hands.process(rgb_check)
+
+                    if hand_check.multi_hand_landmarks:
+                        for hand_landmarks in hand_check.multi_hand_landmarks:
+                            if is_thumbs_up(hand_landmarks):
+                                selected_object_name = name
+                                break
+                    if selected_object_name:
+                        break
+
+                    
+
+                    if cv2.waitKey(1) & 0xFF == ord('q'):
+                        break
+                
+                if selected_object_name:
+                    engine.say(f"Object selected: {selected_object_name}")
+                    engine.runAndWait()
+                    cv2.waitKey(1)
+                    print(f"Object selected for tracking: {selected_object_name}")
+                    break
+                else:
+                    print(f"No thumbs-up for: {name}, moving to next.")
+            
+            if not selected_object_name:
+                engine.say("No object was selected.")
+                engine.runAndWait()
+                cv2.waitKey(1)
+                print("No object selected.")
         else:
             sentence = "I could not detect any consistent objects."
-        print("🔊", sentence)
-        engine.stop()
-        engine.say(" ")
-        engine.runAndWait()
-        engine.say(sentence)
-        time.sleep(0.2)
-        engine.runAndWait()
+            print("🔊", sentence)
+            engine.say(sentence)
+            engine.runAndWait()
+            cv2.waitKey(1)
+                    
+
     # Dynamically add new stable objects after initial lock
     if initial_static_locked:
         for name, positions in object_appearances.items():
@@ -139,22 +197,62 @@ while True:
                 avg_x = int(np.mean([p[0] for p in recent_positions]))
                 avg_y = int(np.mean([p[1] for p in recent_positions]))
                 static_objects[name] = (avg_x, avg_y)
-                print(f"➕ New static object added: {name} at ({avg_x}, {avg_y})")
+                print(f"New static object added: {name} at ({avg_x}, {avg_y})")
 
                 if name not in announced_new_objects and person_position:
                     distance_str, direction = get_distance_and_direction((avg_x, avg_y), person_position)
                     new_sentence = f"New object {name}, about {distance_str} to your {direction}"
                     print("🔊", new_sentence)
                     engine.say(new_sentence)
+                    engine.say(f"Do you want me to track {name}? Show thumbs-up.")
                     try:
                         engine.runAndWait()
+                        cv2.waitKey(1)
                     except RuntimeError:
                         print("Voice engine already running.")
+                    
+                    # Check for thumbs-up within 8 seconds without interfering camera
+                    thumbs_up_detected = False
+                    start_time = time.time()
+                    while time.time() - start_time < 8:
+                        success_check, frame_check = cap.read()
+                        if not success_check:
+                            break
+
+                        frame_check = cv2.flip(frame_check, 1)
+                        rgb_frame_check = cv2.cvtColor(frame_check, cv2.COLOR_BGR2RGB)
+                        hand_check = hands.process(rgb_frame_check)
+
+                        if hand_check.multi_hand_landmarks:
+                            for hand_landmarks in hand_check.multi_hand_landmarks:
+                                if is_thumbs_up(hand_landmarks):
+                                    thumbs_up_detected = True
+                                    break
+                        if thumbs_up_detected:
+                            break
+
+                        
+
+                        if cv2.waitKey(1) & 0xFF == ord('q'):
+                            break
+
+                    if thumbs_up_detected:
+                        selected_object_name = name
+                        print(f"New object selected for tracking: {selected_object_name}")
+                        engine.say(f"Tracking {selected_object_name} now.")
+                        try:
+                            engine.runAndWait()
+                            cv2.waitKey(1)
+                        except RuntimeError:
+                            print("Voice engine already running.")
+                    else:
+                        print(f"User did not select {name}")
+
                     announced_new_objects.add(name)
 
     for name in list(static_objects.keys()):
         if name not in last_seen or (current_time - last_seen[name]) > object_timeout:
-            print(f"❌ Removing lost object: {name}")
+            print(f" Removing lost object: {name}")
             del static_objects[name]
             if name in object_appearances:
                 del object_appearances[name]
@@ -168,19 +266,17 @@ while True:
                 if not thumbs_up_triggered and not speaking:
                     thumbs_up_triggered = True
                     last_thumbs_time = time.time()
-                    if static_objects and person_position:
-                        speak_queue = []
-                        for obj_name, obj_pos in static_objects.items():
-                            distance_str, direction = get_distance_and_direction(obj_pos, person_position)
-                            speak = f"{obj_name} is approximately {distance_str} to your {direction}"
-                            print("🔊", speak)
-                            speak_queue.append(speak)
+
+                    if selected_object_name and selected_object_name in static_objects and person_position:
+                        obj_pos = static_objects[selected_object_name]
+                        distance_str, direction = get_distance_and_direction(obj_pos, person_position)
+                        sentence = f"{selected_object_name} is approximately {distance_str} to your {direction}"
+                        print("🔊", sentence)
 
                         # Speak only once
                         speaking = True
                         engine.stop()
-                        for sentence in speak_queue:
-                            engine.say(sentence)
+                        engine.say(sentence)
                         try:
                             engine.runAndWait()
                             time.sleep(0.5)
@@ -188,13 +284,14 @@ while True:
                             print("Voice engine was already running, skipping.")
                         speaking = False
                     else:
-                        print("🔊 No objects in the frame to track.")
+                        print("🔊 Object not available to track.")
                         engine.stop()
-                        engine.say("No objects in the frame to track.")
+                        engine.say("Object not available to track.")
                         try:
                             engine.runAndWait()
                         except RuntimeError:
                             print("Voice engine was already running, skipping.")
+                        speaking = False
             else:
                 thumbs_up_triggered = False
     else:

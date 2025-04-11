@@ -131,7 +131,7 @@ while True:
         engine.say(sentence)
         time.sleep(0.2)
         engine.runAndWait()
-    # ✅ Step 3: Dynamically add new stable objects after initial lock
+    # Dynamically add new stable objects after initial lock
     if initial_static_locked:
         for name, positions in object_appearances.items():
             if name not in static_objects and len(positions) >= frame_stability_threshold:
@@ -187,8 +187,18 @@ while True:
                         except RuntimeError:
                             print("Voice engine was already running, skipping.")
                         speaking = False
+                    else:
+                        print("🔊 No objects in the frame to track.")
+                        engine.stop()
+                        engine.say("No objects in the frame to track.")
+                        try:
+                            engine.runAndWait()
+                        except RuntimeError:
+                            print("Voice engine was already running, skipping.")
             else:
                 thumbs_up_triggered = False
+    else:
+        thumbs_up_triggered = False
 
     annotated = results[0].plot()
     if thumbs_up_triggered:

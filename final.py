@@ -24,7 +24,7 @@ cap = cv2.VideoCapture(0)
 
 start_time = time.time()
 object_detection_duration = 8
-frame_stability_threshold = 20
+frame_stability_threshold = 35
 
 object_appearances = {}
 static_objects = {}
@@ -33,6 +33,9 @@ thumbs_up_triggered = False
 last_thumbs_time = 0
 last_seen = {}
 object_timeout = 5
+initial_static_locked = False
+announced_new_objects = set()  # To track newly announced objects
+
 
 # Helper function for calculating distance and direction
 def get_distance_and_direction(obj_pos, person_pos):
@@ -102,14 +105,16 @@ while True:
             object_appearances[name].append((cx, cy))
             last_seen[name] = current_time
 
-    if elapsed_time >= object_detection_duration and not static_objects:
+    # Lock initial static objects at 8 seconds only once
+    if not initial_static_locked and elapsed_time >= object_detection_duration:
         for name, positions in object_appearances.items():
             if len(positions) >= frame_stability_threshold:
                 avg_x = int(np.mean([p[0] for p in positions]))
                 avg_y = int(np.mean([p[1] for p in positions]))
-                static_objects[name] = (avg_x, avg_y)
+                static_objects[name] = (avg_x, avg_y) 
+        initial_static_locked = True  # ✅ Mark that we’ve done initial locking
+        print("🔒 Initial static objects locked:", static_objects)
 
-        print("Static objects locked:", static_objects)
         if static_objects and person_position:
             description_parts = []
             for name, pos in static_objects.items():
@@ -126,11 +131,35 @@ while True:
         engine.say(sentence)
         time.sleep(0.2)
         engine.runAndWait()
+    # ✅ Step 3: Dynamically add new stable objects after initial lock
+    if initial_static_locked:
+        for name, positions in object_appearances.items():
+            if name not in static_objects and len(positions) >= frame_stability_threshold:
+                recent_positions = positions[-frame_stability_threshold:]
+                avg_x = int(np.mean([p[0] for p in recent_positions]))
+                avg_y = int(np.mean([p[1] for p in recent_positions]))
+                static_objects[name] = (avg_x, avg_y)
+                print(f"➕ New static object added: {name} at ({avg_x}, {avg_y})")
+
+                if name not in announced_new_objects and person_position:
+                    distance_str, direction = get_distance_and_direction((avg_x, avg_y), person_position)
+                    new_sentence = f"New object {name}, about {distance_str} to your {direction}"
+                    print("🔊", new_sentence)
+                    engine.say(new_sentence)
+                    try:
+                        engine.runAndWait()
+                    except RuntimeError:
+                        print("Voice engine already running.")
+                    announced_new_objects.add(name)
 
     for name in list(static_objects.keys()):
         if name not in last_seen or (current_time - last_seen[name]) > object_timeout:
             print(f"❌ Removing lost object: {name}")
             del static_objects[name]
+            if name in object_appearances:
+                del object_appearances[name]
+            if name in announced_new_objects:
+                announced_new_objects.remove(name)
 
     if hand_results.multi_hand_landmarks:
         for hand_landmarks in hand_results.multi_hand_landmarks:

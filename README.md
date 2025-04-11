@@ -26,8 +26,10 @@ pip install ultralytics opencv-python mediapipe pyttsx3
 ```
 
 2. **Download YOLOv8n model (if not cached automatically):**
+```bash
 from ultralytics import YOLO
 YOLO("yolov8n.pt")
+```
 
 3. **Run the script:**
 ```bash
